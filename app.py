@@ -1,124 +1,76 @@
-import hashlib
-import time
-import json
-from typing import List
+import re
 
-class Transaction:
-    def __init__(self, sender, recipient, amount):
-        self.sender = sender
-        self.recipient = recipient
-        self.amount = amount
+class Lexer:
+    def __init__(self, input_text):
+        self.tokens = re.findall(r'\d+|[-+*/()]|[a-zA-Z_]\w*|\s+', input_text)
+        self.current = 0
 
-class Block:
-    def __init__(self, index, previous_hash, timestamp, transactions, proof, hash):
-        self.index = index
-        self.previous_hash = previous_hash
-        self.timestamp = timestamp
-        self.transactions = transactions
-        self.proof = proof
-        self.hash = hash
+    def get_next_token(self):
+        if self.current < len(self.tokens):
+            token = self.tokens[self.current]
+            self.current += 1
+            return token
+        return None
 
-def calculate_hash(index, previous_hash, timestamp, transactions, proof):
-    value = str(index) + str(previous_hash) + str(timestamp) + str(transactions) + str(proof)
-    return hashlib.sha256(value.encode()).hexdigest()
+class Parser:
+    def __init__(self, lexer):
+        self.lexer = lexer
 
-def create_genesis_block():
-    return Block(0, "0", time.time(), [], 0, calculate_hash(0, "0", time.time(), [], 0))
+    def parse(self):
+        return self._expression()
 
-def create_new_block(index, previous_hash, transactions, proof):
-    timestamp = time.time()
-    hash = calculate_hash(index, previous_hash, timestamp, transactions, proof)
-    return Block(index, previous_hash, timestamp, transactions, proof, hash)
+    def _expression(self):
+        term = self._term()
+        while True:
+            op = self.lexer.get_next_token()
+            if op in ('+', '-'):
+                term = term + self._term() if op == '+' else term - self._term()
+            else:
+                self.lexer.current -= 1
+                break
+        return term
 
-def proof_of_work(last_proof):
-    proof = 0
-    while not valid_proof(last_proof, proof):
-        proof += 1
-    return proof
+    def _term(self):
+        factor = self._factor()
+        while True:
+            op = self.lexer.get_next_token()
+            if op in ('*', '/'):
+                factor = factor * self._factor() if op == '*' else factor / self._factor()
+            else:
+                self.lexer.current -= 1
+                break
+        return factor
 
-def valid_proof(last_proof, proof):
-    guess = f'{last_proof}{proof}'.encode()
-    guess_hash = hashlib.sha256(guess).hexdigest()
-    return guess_hash[:2] == "00"
+    def _factor(self):
+        token = self.lexer.get_next_token()
+        if token.isdigit():
+            return int(token)
+        elif token.isalpha():
+            return 0 
+        elif token == '(':
+            result = self._expression()
+            if self.lexer.get_next_token() != ')':
+                raise SyntaxError("Mismatched parentheses")
+            return result
+        else:
+            raise SyntaxError("Invalid token: {}".format(token))
 
-class Blockchain:
-    def __init__(self):
-        self.chain = [create_genesis_block()]
-        self.transactions = []
-        self.nodes = set()
+class CalculatorInterpreter:
+    def evaluate(self, expression):
+        lexer = Lexer(expression)
+        parser = Parser(lexer)
+        return parser.parse()
 
-    def add_transaction(self, sender, recipient, amount):
-        self.transactions.append(Transaction(sender, recipient, amount))
-        return self.last_block.index + 1
+if __name__ == "__main__":
+    interpreter = CalculatorInterpreter()
 
-    def add_node(self, address):
-        self.nodes.add(address)
+    while True:
+        try:
+            expression = input("Enter an arithmetic expression (or 'exit' to quit): ")
+            if expression.lower() == 'exit':
+                break
 
-    def valid_chain(self, chain):
-        last_block = chain[0]
-        current_index = 1
-
-        while current_index < len(chain):
-            block = chain[current_index]
-
-            if block['previous_hash'] != calculate_hash(last_block['index'], last_block['previous_hash'], last_block['timestamp'], last_block['transactions'], last_block['proof']):
-                return False
-
-            if not valid_proof(last_block['proof'], block['proof']):
-                return False
-
-            last_block = block
-            current_index += 1
-
-        return True
-
-    def resolve_conflicts(self):
-        neighbors = self.nodes
-        new_chain = None
-
-        max_length = len(self.chain)
-
-        for node in neighbors:
-            response = requests.get(f'http://{node}/chain')
-
-            if response.status_code == 200:
-                length = response.json()['length']
-                chain = response.json()['chain']
-
-                if length > max_length and self.valid_chain(chain):
-                    max_length = length
-                    new_chain = chain
-
-        if new_chain:
-            self.chain = new_chain
-            return True
-
-        return False
-
-# Example usage:
-blockchain = Blockchain()
-
-# Mining Genesis Block
-last_block = blockchain.chain[-1]
-proof = proof_of_work(last_block.proof)
-blockchain.add_transaction("Genesis", "Alice", 1)
-# ... (additional transactions)
-blockchain.add_transaction("Genesis", "Tyler", 20)
-
-blockchain.add_node("http://localhost:5001")
-
-last_proof = last_block.proof
-proof = proof_of_work(last_proof)
-
-# Mining New Block
-blockchain.add_transaction("Miner", "Recipient", 1)  # Example transaction
-block = create_new_block(last_block.index + 1, last_block.hash, blockchain.transactions, proof)
-
-# Reset the current list of transactions
-blockchain.transactions = []
-
-blockchain.chain.append(block)
-
-# Print the blockchain
-for block in blockchain.chain:
-    print(f"Block #{block.index} - Hash: {block.hash} - Proof: {block.proof} - Transactions: {len(block.transactions)}")
+            result = interpreter.evaluate(expression)
+            print("Result:", result)
+        except Exception as e:
+            print("Error:", e)
